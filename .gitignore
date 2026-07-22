@@ -35,3 +35,5 @@ logs/
 
 # ==== Docker ====
 docker-compose.override.yml
+
+drone-fleet-platform-brief.md
