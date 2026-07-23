@@ -24,7 +24,7 @@ export function AssistantPanel({ turns, onAsk, onClose }: AssistantPanelProps) {
   };
 
   return (
-    <div className="absolute inset-y-0 end-0 z-20 w-96 max-w-full p-3">
+    <div className="absolute inset-y-0 inset-e-0 z-1100 w-96 max-w-full p-3">
       <Card className="flex h-full min-h-0 flex-col shadow-xl ring-1 ring-foreground/10">
         <CardHeader className="border-b pb-3">
           <CardTitle className="flex items-center justify-between">
