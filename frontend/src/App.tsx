@@ -1,13 +1,16 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertsPanel } from "./components/AlertsPanel";
+import { AssistantPanel } from "./components/AssistantPanel";
 import { DroneMap } from "./components/DroneMap";
 import { MissionsPanel } from "./components/MissionsPanel";
 import { useAlerts } from "./hooks/useAlerts";
+import { useAssistant } from "./hooks/useAssistant";
 import { useFleetTelemetry } from "./hooks/useFleetTelemetry";
 import { useMissions } from "./hooks/useMissions";
 import type { Waypoint } from "./types/mission";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 // Waypoint altitude isn't picked in the UI (clicks only give lat/lon) - every
 // drone-assigned waypoint flies at this fixed altitude.
@@ -18,10 +21,12 @@ function App() {
   const { drones, status } = useFleetTelemetry();
   const { alerts } = useAlerts();
   const { missions, createMission, cancelMission } = useMissions();
+  const { turns, ask } = useAssistant();
   const droneList = useMemo(() => Array.from(drones.values()), [drones]);
 
   const [pickingDroneId, setPickingDroneId] = useState<string | null>(null);
   const [draftWaypoints, setDraftWaypoints] = useState<Waypoint[]>([]);
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   const statusVariant =
     status === "connected" ? "default" : status === "connecting" ? "secondary" : "destructive";
@@ -60,8 +65,11 @@ function App() {
           {status === "disconnected" && t("map.disconnected")}
         </Badge>
         <Badge variant="outline">{t("map.droneCount", { count: droneList.length })}</Badge>
+        <Button size="sm" variant="secondary" onClick={() => setAssistantOpen((v) => !v)}>
+          {t("assistant.openButton")}
+        </Button>
       </header>
-      <main className="flex min-h-0 flex-1">
+      <main className="relative flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           <DroneMap
             drones={droneList}
@@ -71,6 +79,9 @@ function App() {
             onMapClick={handleMapClick}
           />
         </div>
+        {assistantOpen && (
+          <AssistantPanel turns={turns} onAsk={ask} onClose={() => setAssistantOpen(false)} />
+        )}
         <aside className="flex w-80 shrink-0 flex-col divide-y">
           <div className="min-h-0 flex-1">
             <AlertsPanel alerts={alerts} />

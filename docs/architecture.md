@@ -60,9 +60,9 @@ flowchart LR
   RAG -->|LLM + embed calls| CLAUDE
 ```
 
-## Current shape (Phase 4 — mission assignment is real)
+## Current shape (Phase 5 — the RAG assistant is real)
 
-`simulator-service` is a Kafka producer of `drone.telemetry` (one message per drone per tick, keyed by `droneId`) and, since Phase 4, also a consumer/producer on `mission.events`. `telemetry-service` and `alert-service` are independent consumers of `drone.telemetry` - neither knows the other exists. `alert-service` produces `drone.alerts`, which `telemetry-service` also consumes and relays onto the WebSocket the frontend already holds. `mission-service` owns mission CRUD (Postgres) and publishes `ASSIGNED`/`CANCELLED` lifecycle events; `simulator-service` is the only party that knows when a drone actually starts/finishes flying a route, so it publishes `STARTED`/`COMPLETED` back onto the same topic, and `mission-service` consumes its own topic to keep mission rows in sync. `telemetry-service` also relays `mission.events` onto the WebSocket for live mission status in the UI. Gateway/auth (and the REST proxying they'd give the frontend) are still Phase 6 - until then the frontend talks to `telemetry-service` (WebSocket), `alert-service` (REST), and `mission-service` (REST) directly.
+`simulator-service` is a Kafka producer of `drone.telemetry` (one message per drone per tick, keyed by `droneId`) and, since Phase 4, also a consumer/producer on `mission.events`. `telemetry-service` and `alert-service` are independent consumers of `drone.telemetry` - neither knows the other exists. `alert-service` produces `drone.alerts`, which `telemetry-service` also consumes and relays onto the WebSocket the frontend already holds. `mission-service` owns mission CRUD (Postgres) and publishes `ASSIGNED`/`CANCELLED` lifecycle events; `simulator-service` is the only party that knows when a drone actually starts/finishes flying a route, so it publishes `STARTED`/`COMPLETED` back onto the same topic, and `mission-service` consumes its own topic to keep mission rows in sync. `telemetry-service` also relays `mission.events` onto the WebSocket for live mission status in the UI. `rag-service` sits outside the Kafka fan-out entirely - it's a plain REST service (no topic involvement) that answers regulation/SOP questions via retrieval-augmented generation against pgvector, called directly by the frontend. Gateway/auth (and the REST proxying they'd give the frontend) are still Phase 6 - until then the frontend talks to `telemetry-service` (WebSocket), `alert-service`, `mission-service`, and `rag-service` (REST) directly.
 
 ```mermaid
 flowchart LR
@@ -74,7 +74,10 @@ flowchart LR
   TEL["Telemetry Service<br/>consumes all 3 topics · STOMP host · flight-log writer"]
   ALERT["Alert Service<br/>consumes drone.telemetry · rule engine · produces drone.alerts"]
   MIS["Mission Service<br/>mission CRUD · produces ASSIGNED/CANCELLED"]
+  RAG["RAG Service<br/>Spring AI · Claude + Ollama + pgvector"]
   PG[("PostgreSQL")]
+  OLLAMA["Ollama (local)<br/>bge-m3 embeddings"]
+  CLAUDE["Claude API"]
 
   SIM -->|produces| T1
   T1 --> TEL
@@ -89,17 +92,21 @@ flowchart LR
   TEL -->|"STOMP /topic/telemetry, /topic/alerts, /topic/missions"| FE
   FE -->|"REST GET /api/alerts/active"| ALERT
   FE -->|"REST POST/GET /api/missions"| MIS
+  FE -->|"REST POST /api/assistant/ask"| RAG
+  RAG -->|embed query + chunks| OLLAMA
+  RAG -->|chat completion| CLAUDE
+  RAG -->|"similarity search · rag.vector_store"| PG
   TEL -->|flight_logs| PG
   ALERT -->|alerts| PG
   MIS -->|missions| PG
 ```
 
-> Note: `simulator-service`, `telemetry-service`, `alert-service`, and `mission-service` each carry their own copy of the wire-shape classes they need (`TelemetryFrame`/`Position`/`DroneStatus`, `AlertDto`/`AlertType`/`AlertSeverity`, `MissionEventDto`/`WaypointDto`/`MissionEventType`) rather than sharing a library module - each service stays independently deployable, at the cost of manually keeping the mirrored shapes in sync. Kafka JSON (de)serialization: producers set `spring.json.add.type.headers=false` so they don't stamp messages with a class name from their own package; each `@KafkaListener` instead pins `spring.json.value.default.type` to its own local class.
+> Note: `simulator-service`, `telemetry-service`, `alert-service`, and `mission-service` each carry their own copy of the wire-shape classes they need (`TelemetryFrame`/`Position`/`DroneStatus`, `AlertDto`/`AlertType`/`AlertSeverity`, `MissionEventDto`/`WaypointDto`/`MissionEventType`) rather than sharing a library module - each service stays independently deployable, at the cost of manually keeping the mirrored shapes in sync. Kafka JSON (de)serialization: producers set `spring.json.add.type.headers=false` so they don't stamp messages with a class name from their own package; each `@KafkaListener` instead pins `spring.json.value.default.type` to its own local class. `rag-service` doesn't participate in this at all - no Kafka dependency, no mirrored DTOs, just REST in and REST out.
 
 ## Message shapes
 
 English field names throughout; ISO-8601 timestamps. These are the wire
-formats, as actually implemented as of Phase 4.
+formats, as actually implemented as of Phase 5.
 
 ### Telemetry (`drone.telemetry` from Phase 3; broadcast on `/topic/telemetry` since Phase 1)
 ```json
@@ -147,6 +154,23 @@ formats, as actually implemented as of Phase 4.
 ```
 `type` codes: `ASSIGNED`, `CANCELLED` (published by mission-service, the system of record); `STARTED`, `COMPLETED` (published back by simulator-service, the only party that knows when a drone actually starts/finishes a route). `waypoints` is only populated on `ASSIGNED`. This is a lifecycle event, not the full mission record - `GET /api/missions` on mission-service returns the full `MissionDto` (adds `status`, `createdAt`, `startedAt`, `completedAt`).
 
+### Assistant Q&A (`POST /api/assistant/ask` on rag-service, REST only - no Kafka topic)
+Request:
+```json
+{ "question": "ما هو الحد الأقصى للارتفاع المسموح به لطيران الطائرة المسيرة؟" }
+```
+Response:
+```json
+{
+  "answer": "الحد الأقصى للارتفاع...",
+  "citations": [
+    { "source": "gacar-part-107.pdf", "sourceType": "regulation", "page": 18, "score": 0.56, "excerpt": "..." },
+    { "source": "sop-ops-001-flight-operations.txt", "sourceType": "sop", "page": null, "score": 0.69, "excerpt": "..." }
+  ]
+}
+```
+`sourceType` codes: `regulation` (GACAR Part 107 PDF, English source text), `sop` (the two self-written Arabic SOP docs). `page` is only populated for PDF-sourced chunks. The corpus is genuinely bilingual - GACAR Part 107 is only published in English by GACA, so retrieval is cross-lingual (Arabic question → `bge-m3` multilingual embeddings → matches against both English and Arabic chunks) and the answer is always generated in Arabic regardless of which language the matched chunk was in, citing the exact source section.
+
 ## Conventions
 
 - **Package base:** `com.dronefleet.<service>`
@@ -174,3 +198,5 @@ formats, as actually implemented as of Phase 4.
 - `drone.telemetry` — one message per drone per tick (high volume)
 - `drone.alerts` — emitted by the alert engine on a rule violation
 - `mission.events` — mission lifecycle: `ASSIGNED`/`CANCELLED` (mission-service) and `STARTED`/`COMPLETED` (simulator-service)
+
+> `rag-service` is not on Kafka at all - it's a self-contained REST service (`POST /api/assistant/ask`) with its own local dependency, **Ollama** (`brew install ollama`, model `bge-m3`, `localhost:11434`), used only for embeddings. Chat completion goes to the real Claude API. Both are configured in `rag-service/application.properties`; the Anthropic key is loaded from a gitignored `rag-service/.env` (see `.env.example`) via a small first-party `EnvironmentPostProcessor` - not a Kafka/Postgres-schema concern like the other services, called out here because it's the one service with an external secret dependency.

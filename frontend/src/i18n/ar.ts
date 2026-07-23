@@ -51,6 +51,21 @@ export const ar = {
         HIGH: "عالٍ",
       },
     },
+    assistant: {
+      openButton: "المساعد الذكي",
+      title: "المساعد الذكي",
+      close: "إغلاق",
+      empty: "اسأل عن لائحة الطيران المسيّر أو إجراءات التشغيل الداخلية",
+      placeholder: "اكتب سؤالك هنا...",
+      send: "إرسال",
+      thinking: "جارٍ البحث والإجابة...",
+      error: "تعذّر الحصول على إجابة، حاول مرة أخرى",
+      citations: "المصادر",
+      sourceType: {
+        regulation: "لائحة GACAR",
+        sop: "إجراء داخلي",
+      },
+    },
     mission: {
       title: "المهام",
       empty: "لا توجد مهام",
