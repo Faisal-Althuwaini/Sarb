@@ -1,6 +1,8 @@
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
+import { Fragment } from "react";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMapEvents } from "react-leaflet";
 import { useTranslation } from "react-i18next";
 import type { DroneTelemetry } from "../types/drone";
+import type { Mission, Waypoint } from "../types/mission";
 import { droneColor, droneStatusBadgeVariant } from "../utils/droneVisuals";
 import { Badge } from "@/components/ui/badge";
 import "leaflet/dist/leaflet.css";
@@ -11,23 +13,78 @@ const DEFAULT_ZOOM = 12;
 
 interface DroneMapProps {
   drones: DroneTelemetry[];
+  missions: Mission[];
+  pickingDroneId: string | null;
+  draftWaypoints: Waypoint[];
+  onMapClick: (lat: number, lon: number) => void;
 }
 
-export function DroneMap({ drones }: DroneMapProps) {
+function MapClickHandler({ enabled, onClick }: { enabled: boolean; onClick: (lat: number, lon: number) => void }) {
+  useMapEvents({
+    click: (e) => {
+      if (enabled) {
+        onClick(e.latlng.lat, e.latlng.lng);
+      }
+    },
+  });
+  return null;
+}
+
+export function DroneMap({ drones, missions, pickingDroneId, draftWaypoints, onMapClick }: DroneMapProps) {
   const { t } = useTranslation();
+  const activeMissions = missions.filter(
+    (m) => (m.status === "ASSIGNED" || m.status === "IN_PROGRESS") && m.waypoints.length > 0,
+  );
 
   return (
     <MapContainer
       center={RIYADH_CENTER}
       zoom={DEFAULT_ZOOM}
-      style={{ height: "100%", width: "100%" }}
+      style={{ height: "100%", width: "100%", cursor: pickingDroneId ? "crosshair" : undefined }}
       // Leaflet's zoom/attribution controls are positioned by CSS and are LTR-agnostic;
       // no RTL-specific map handling is needed here.
     >
+      <MapClickHandler enabled={pickingDroneId !== null} onClick={onMapClick} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      {activeMissions.map((mission) => {
+        const drone = drones.find((d) => d.droneId === mission.droneId);
+        const positions: [number, number][] = [
+          ...(drone ? ([[drone.position.lat, drone.position.lon]] as [number, number][]) : []),
+          ...mission.waypoints.map((w): [number, number] => [w.lat, w.lon]),
+        ];
+        return (
+          <Fragment key={mission.missionId}>
+            <Polyline positions={positions} pathOptions={{ color: "#2563eb", weight: 2, dashArray: "6 6" }} />
+            {mission.waypoints.map((wp, i) => (
+              <CircleMarker
+                key={i}
+                center={[wp.lat, wp.lon]}
+                radius={4}
+                pathOptions={{ color: "#1d4ed8", weight: 1, fillColor: "#3b82f6", fillOpacity: 1 }}
+              />
+            ))}
+          </Fragment>
+        );
+      })}
+      {draftWaypoints.length > 0 && (
+        <>
+          <Polyline
+            positions={draftWaypoints.map((w): [number, number] => [w.lat, w.lon])}
+            pathOptions={{ color: "#16a34a", weight: 2, dashArray: "4 6" }}
+          />
+          {draftWaypoints.map((wp, i) => (
+            <CircleMarker
+              key={i}
+              center={[wp.lat, wp.lon]}
+              radius={5}
+              pathOptions={{ color: "#15803d", weight: 1, fillColor: "#22c55e", fillOpacity: 1 }}
+            />
+          ))}
+        </>
+      )}
       {drones.map((drone) => (
         <CircleMarker
           key={drone.droneId}

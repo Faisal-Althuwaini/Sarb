@@ -51,6 +51,23 @@ export const ar = {
         HIGH: "عالٍ",
       },
     },
+    mission: {
+      title: "المهام",
+      empty: "لا توجد مهام",
+      assign: "تعيين",
+      selectDrone: "اختر طائرة",
+      pickWaypoints: "انقر على الخريطة لإضافة نقاط المسار",
+      waypointCount: "نقاط المسار: {{count}}",
+      submit: "إرسال",
+      cancelDraft: "إلغاء",
+      cancelMission: "إلغاء المهمة",
+      status: {
+        ASSIGNED: "معيّنة",
+        IN_PROGRESS: "قيد التنفيذ",
+        COMPLETED: "مكتملة",
+        CANCELLED: "ملغاة",
+      },
+    },
   },
 };
 

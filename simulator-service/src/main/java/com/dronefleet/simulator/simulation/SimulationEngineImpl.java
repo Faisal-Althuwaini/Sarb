@@ -1,6 +1,7 @@
 package com.dronefleet.simulator.simulation;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 import jakarta.annotation.PostConstruct;
@@ -14,8 +15,11 @@ import org.springframework.stereotype.Component;
 
 import com.dronefleet.simulator.config.SimulatorProperties;
 import com.dronefleet.simulator.geo.GeoMath;
+import com.dronefleet.simulator.mission.MissionEventDto;
+import com.dronefleet.simulator.mission.MissionEventType;
 import com.dronefleet.simulator.model.Drone;
 import com.dronefleet.simulator.model.DroneStatus;
+import com.dronefleet.simulator.model.Position;
 import com.dronefleet.simulator.model.TelemetryFrame;
 import com.dronefleet.simulator.registry.DroneRegistry;
 
@@ -35,13 +39,19 @@ public class SimulationEngineImpl implements SimulationEngine {
 
 	private static final double LOW_BATTERY_THRESHOLD = 25.0;
 	private static final double CRITICAL_BATTERY_THRESHOLD = 8.0;
+	// Close enough to a waypoint to call it "arrived" and advance to the next one.
+	private static final double WAYPOINT_ARRIVAL_RADIUS_M = 15.0;
 
 	private final SimulatorProperties properties;
 	private final DroneRegistry registry;
 	private final KafkaTemplate<String, TelemetryFrame> kafkaTemplate;
+	private final KafkaTemplate<String, MissionEventDto> missionKafkaTemplate;
 
 	@Value("${sarb.kafka.topics.telemetry}")
 	private String telemetryTopic;
+
+	@Value("${sarb.kafka.topics.missions}")
+	private String missionsTopic;
 
 	@Override
 	@PostConstruct
@@ -92,12 +102,32 @@ public class SimulationEngineImpl implements SimulationEngine {
 			return;
 		}
 
-		// Jitter the heading a little each tick so movement looks natural,
-		// not perfectly straight-line.
+		double distanceM = drone.getSpeedMps() * tickSeconds;
+		if (drone.getWaypoints() != null && !drone.getWaypoints().isEmpty()) {
+			flyMission(drone, distanceM);
+		} else {
+			wander(drone, rnd, distanceM);
+		}
+
+		// Drain battery a little each tick; rate varies slightly per drone
+		// via jitter so drones don't all cross thresholds in lockstep.
+		double drainPerTick = (0.015 + rnd.nextDouble(0, 0.02)) * (tickSeconds / 0.4);
+		double newBattery = Math.max(0.0, drone.getBatteryPct() - drainPerTick);
+		drone.setBatteryPct(newBattery);
+
+		if (newBattery <= 0.0) {
+			drone.setStatus(DroneStatus.LANDED);
+			drone.setSpeedMps(0.0);
+		} else if (newBattery <= CRITICAL_BATTERY_THRESHOLD || newBattery <= LOW_BATTERY_THRESHOLD) {
+			drone.setStatus(DroneStatus.LOW_BATTERY);
+		}
+	}
+
+	/** Free flight: jittered heading, biased back toward the demo center once it drifts too far. */
+	private void wander(Drone drone, ThreadLocalRandom rnd, double distanceM) {
 		double jitterDeg = rnd.nextDouble(-8.0, 8.0);
 		double headingDeg = GeoMath.normalizeDegrees(drone.getHeadingDeg() + jitterDeg);
 
-		double distanceM = drone.getSpeedMps() * tickSeconds;
 		double headingRad = Math.toRadians(headingDeg);
 		double metersPerDegreeLon = GeoMath.metersPerDegreeLat() * Math.cos(Math.toRadians(drone.getLat()));
 
@@ -121,19 +151,48 @@ public class SimulationEngineImpl implements SimulationEngine {
 		drone.setHeadingDeg(headingDeg);
 		drone.setLat(newLat);
 		drone.setLon(newLon);
+	}
 
-		// Drain battery a little each tick; rate varies slightly per drone
-		// via jitter so drones don't all cross thresholds in lockstep.
-		double drainPerTick = (0.015 + rnd.nextDouble(0, 0.02)) * (tickSeconds / 0.4);
-		double newBattery = Math.max(0.0, drone.getBatteryPct() - drainPerTick);
-		drone.setBatteryPct(newBattery);
+	/**
+	 * Mission flight: fly straight at the current waypoint (no jitter, no
+	 * geofence recentering - the assigned route is authoritative). Once within
+	 * {@link #WAYPOINT_ARRIVAL_RADIUS_M} of it, advance to the next one; once
+	 * past the last one, publish COMPLETED and hand the drone back to wander().
+	 */
+	private void flyMission(Drone drone, double distanceM) {
+		List<Position> waypoints = drone.getWaypoints();
+		Position target = waypoints.get(drone.getWaypointIndex());
 
-		if (newBattery <= 0.0) {
-			drone.setStatus(DroneStatus.LANDED);
-			drone.setSpeedMps(0.0);
-		} else if (newBattery <= CRITICAL_BATTERY_THRESHOLD || newBattery <= LOW_BATTERY_THRESHOLD) {
-			drone.setStatus(DroneStatus.LOW_BATTERY);
+		double headingDeg = GeoMath.bearingDegrees(drone.getLat(), drone.getLon(), target.lat(), target.lon());
+		double headingRad = Math.toRadians(headingDeg);
+		double metersPerDegreeLon = GeoMath.metersPerDegreeLat() * Math.cos(Math.toRadians(drone.getLat()));
+
+		double remainingM = GeoMath.haversineKm(drone.getLat(), drone.getLon(), target.lat(), target.lon()) * 1000.0;
+
+		drone.setHeadingDeg(headingDeg);
+		if (remainingM <= Math.max(distanceM, WAYPOINT_ARRIVAL_RADIUS_M)) {
+			// Close enough this tick to snap to the waypoint rather than overshoot it.
+			drone.setLat(target.lat());
+			drone.setLon(target.lon());
+			drone.setWaypointIndex(drone.getWaypointIndex() + 1);
+			if (drone.getWaypointIndex() >= waypoints.size()) {
+				completeMission(drone);
+			}
+		} else {
+			drone.setLat(drone.getLat() + (distanceM * Math.cos(headingRad)) / GeoMath.metersPerDegreeLat());
+			drone.setLon(drone.getLon() + (distanceM * Math.sin(headingRad)) / metersPerDegreeLon);
 		}
+	}
+
+	private void completeMission(Drone drone) {
+		String missionId = drone.getMissionId();
+		log.info("Drone {} completed mission {}", drone.getDroneId(), missionId);
+		drone.setWaypoints(null);
+		drone.setWaypointIndex(0);
+		drone.setMissionId(null);
+		missionKafkaTemplate.send(missionsTopic, drone.getDroneId(),
+				new MissionEventDto(Long.valueOf(missionId), drone.getDroneId(), MissionEventType.COMPLETED,
+						List.of(), Instant.now()));
 	}
 
 	private static double[] randomPointWithinRadius(ThreadLocalRandom rnd, double centerLat, double centerLon,

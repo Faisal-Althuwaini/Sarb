@@ -60,18 +60,20 @@ flowchart LR
   RAG -->|LLM + embed calls| CLAUDE
 ```
 
-## Current shape (Phase 3 — Kafka fan-out is real)
+## Current shape (Phase 4 — mission assignment is real)
 
-`simulator-service` is now a pure Kafka producer: one `drone.telemetry` message per drone per tick, keyed by `droneId`. `telemetry-service` and `alert-service` are independent consumers of that same topic - neither knows the other exists. `alert-service` produces `drone.alerts`, which `telemetry-service` also consumes and relays onto the WebSocket the frontend already holds. Gateway/auth (and the REST proxying they'd give the frontend) are still Phase 6 - until then the frontend talks to `telemetry-service` (WebSocket) and `alert-service` (REST) directly.
+`simulator-service` is a Kafka producer of `drone.telemetry` (one message per drone per tick, keyed by `droneId`) and, since Phase 4, also a consumer/producer on `mission.events`. `telemetry-service` and `alert-service` are independent consumers of `drone.telemetry` - neither knows the other exists. `alert-service` produces `drone.alerts`, which `telemetry-service` also consumes and relays onto the WebSocket the frontend already holds. `mission-service` owns mission CRUD (Postgres) and publishes `ASSIGNED`/`CANCELLED` lifecycle events; `simulator-service` is the only party that knows when a drone actually starts/finishes flying a route, so it publishes `STARTED`/`COMPLETED` back onto the same topic, and `mission-service` consumes its own topic to keep mission rows in sync. `telemetry-service` also relays `mission.events` onto the WebSocket for live mission status in the UI. Gateway/auth (and the REST proxying they'd give the frontend) are still Phase 6 - until then the frontend talks to `telemetry-service` (WebSocket), `alert-service` (REST), and `mission-service` (REST) directly.
 
 ```mermaid
 flowchart LR
   FE["Frontend<br/>shadcn/ui · Arabic RTL · Leaflet"]
-  SIM["Simulator Service<br/>tick loop, Kafka producer only"]
+  SIM["Simulator Service<br/>tick loop · flies assigned routes"]
   T1(["drone.telemetry"])
   T2(["drone.alerts"])
-  TEL["Telemetry Service<br/>consumes both topics · STOMP host · flight-log writer"]
+  T3(["mission.events"])
+  TEL["Telemetry Service<br/>consumes all 3 topics · STOMP host · flight-log writer"]
   ALERT["Alert Service<br/>consumes drone.telemetry · rule engine · produces drone.alerts"]
+  MIS["Mission Service<br/>mission CRUD · produces ASSIGNED/CANCELLED"]
   PG[("PostgreSQL")]
 
   SIM -->|produces| T1
@@ -79,20 +81,25 @@ flowchart LR
   T1 --> ALERT
   ALERT -->|produces| T2
   T2 --> TEL
-  TEL -->|"STOMP /topic/telemetry, /topic/alerts"| FE
+  MIS -->|produces ASSIGNED/CANCELLED| T3
+  T3 --> SIM
+  SIM -->|produces STARTED/COMPLETED| T3
+  T3 --> TEL
+  T3 --> MIS
+  TEL -->|"STOMP /topic/telemetry, /topic/alerts, /topic/missions"| FE
   FE -->|"REST GET /api/alerts/active"| ALERT
+  FE -->|"REST POST/GET /api/missions"| MIS
   TEL -->|flight_logs| PG
   ALERT -->|alerts| PG
+  MIS -->|missions| PG
 ```
 
-> Note: `simulator-service`, `telemetry-service`, and `alert-service` each carry their own copy of the `TelemetryFrame`/`Position`/`DroneStatus` wire-shape classes (and `alert-service`/`telemetry-service` their own `AlertDto`/`AlertType`/`AlertSeverity`) rather than sharing a library module - each service stays independently deployable, at the cost of manually keeping the mirrored shapes in sync. Kafka JSON (de)serialization: producers set `spring.json.add.type.headers=false` so they don't stamp messages with a class name from their own package; each `@KafkaListener` instead pins `spring.json.value.default.type` to its own local class.
+> Note: `simulator-service`, `telemetry-service`, `alert-service`, and `mission-service` each carry their own copy of the wire-shape classes they need (`TelemetryFrame`/`Position`/`DroneStatus`, `AlertDto`/`AlertType`/`AlertSeverity`, `MissionEventDto`/`WaypointDto`/`MissionEventType`) rather than sharing a library module - each service stays independently deployable, at the cost of manually keeping the mirrored shapes in sync. Kafka JSON (de)serialization: producers set `spring.json.add.type.headers=false` so they don't stamp messages with a class name from their own package; each `@KafkaListener` instead pins `spring.json.value.default.type` to its own local class.
 
 ## Message shapes
 
 English field names throughout; ISO-8601 timestamps. These are the wire
-formats — Phase 1 broadcasts telemetry frames over STOMP as a JSON array of
-the shape below (`List<TelemetryFrame>` → `/topic/telemetry`); the alert and
-mission shapes below are illustrative ahead of Phases 2–4.
+formats, as actually implemented as of Phase 4.
 
 ### Telemetry (`drone.telemetry` from Phase 3; broadcast on `/topic/telemetry` since Phase 1)
 ```json
@@ -125,19 +132,20 @@ mission shapes below are illustrative ahead of Phases 2–4.
 `resolvedAt == null` means the alert is still active. `type` codes: `GEOFENCE_BREACH`, `LOW_BATTERY`, `CRITICAL_BATTERY`,
 `ALTITUDE_VIOLATION`, `LOST_SIGNAL`.
 
-### Mission (`mission.events`, Phase 4)
+### Mission event (`mission.events`, produced by mission-service and simulator-service since Phase 4)
 ```json
 {
-  "missionId": "mission-4",
-  "name": "Perimeter sweep",
+  "missionId": 4,
+  "droneId": "drone-017",
+  "type": "ASSIGNED",
   "waypoints": [
     { "lat": 24.71, "lon": 46.67, "altitudeM": 80 },
     { "lat": 24.72, "lon": 46.69, "altitudeM": 80 }
   ],
-  "assignedDroneId": "drone-017",
-  "status": "IN_PROGRESS"
+  "timestamp": "2026-01-15T10:32:04.120Z"
 }
 ```
+`type` codes: `ASSIGNED`, `CANCELLED` (published by mission-service, the system of record); `STARTED`, `COMPLETED` (published back by simulator-service, the only party that knows when a drone actually starts/finishes a route). `waypoints` is only populated on `ASSIGNED`. This is a lifecycle event, not the full mission record - `GET /api/missions` on mission-service returns the full `MissionDto` (adds `status`, `createdAt`, `startedAt`, `completedAt`).
 
 ## Conventions
 
@@ -165,4 +173,4 @@ mission shapes below are illustrative ahead of Phases 2–4.
 
 - `drone.telemetry` — one message per drone per tick (high volume)
 - `drone.alerts` — emitted by the alert engine on a rule violation
-- `mission.events` — mission lifecycle (created, assigned, started, completed, aborted)
+- `mission.events` — mission lifecycle: `ASSIGNED`/`CANCELLED` (mission-service) and `STARTED`/`COMPLETED` (simulator-service)

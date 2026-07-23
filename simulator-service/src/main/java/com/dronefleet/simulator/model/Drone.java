@@ -1,6 +1,7 @@
 package com.dronefleet.simulator.model;
 
 import java.time.Instant;
+import java.util.List;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -27,6 +28,11 @@ public class Drone {
 	private DroneStatus status;
 	private String missionId;
 	private Instant lastUpdate;
+
+	// Phase 4: non-null while a mission is assigned - advance() flies toward
+	// waypoints[waypointIndex] instead of random wandering. Null/0 otherwise.
+	private List<Position> waypoints;
+	private int waypointIndex;
 
 	public Drone(String droneId, double lat, double lon, double altitudeM, double speedMps,
 			double headingDeg, double batteryPct, DroneStatus status, String missionId) {
