@@ -60,14 +60,32 @@ flowchart LR
   RAG -->|LLM + embed calls| CLAUDE
 ```
 
-## Phase 1 shape (the hook, no Kafka yet)
+## Current shape (Phase 3 — Kafka fan-out is real)
 
-To reach "drones moving on a map" fast, the simulator hosts the WebSocket directly. The telemetry-service split and Kafka fan-out arrive in Phase 3.
+`simulator-service` is now a pure Kafka producer: one `drone.telemetry` message per drone per tick, keyed by `droneId`. `telemetry-service` and `alert-service` are independent consumers of that same topic - neither knows the other exists. `alert-service` produces `drone.alerts`, which `telemetry-service` also consumes and relays onto the WebSocket the frontend already holds. Gateway/auth (and the REST proxying they'd give the frontend) are still Phase 6 - until then the frontend talks to `telemetry-service` (WebSocket) and `alert-service` (REST) directly.
 
 ```mermaid
 flowchart LR
-  SIM["Simulator Service<br/>tick loop + STOMP endpoint"] -->|"STOMP /topic/telemetry"| FE["Frontend<br/>shadcn/ui · Arabic RTL · Leaflet"]
+  FE["Frontend<br/>shadcn/ui · Arabic RTL · Leaflet"]
+  SIM["Simulator Service<br/>tick loop, Kafka producer only"]
+  T1(["drone.telemetry"])
+  T2(["drone.alerts"])
+  TEL["Telemetry Service<br/>consumes both topics · STOMP host · flight-log writer"]
+  ALERT["Alert Service<br/>consumes drone.telemetry · rule engine · produces drone.alerts"]
+  PG[("PostgreSQL")]
+
+  SIM -->|produces| T1
+  T1 --> TEL
+  T1 --> ALERT
+  ALERT -->|produces| T2
+  T2 --> TEL
+  TEL -->|"STOMP /topic/telemetry, /topic/alerts"| FE
+  FE -->|"REST GET /api/alerts/active"| ALERT
+  TEL -->|flight_logs| PG
+  ALERT -->|alerts| PG
 ```
+
+> Note: `simulator-service`, `telemetry-service`, and `alert-service` each carry their own copy of the `TelemetryFrame`/`Position`/`DroneStatus` wire-shape classes (and `alert-service`/`telemetry-service` their own `AlertDto`/`AlertType`/`AlertSeverity`) rather than sharing a library module - each service stays independently deployable, at the cost of manually keeping the mirrored shapes in sync. Kafka JSON (de)serialization: producers set `spring.json.add.type.headers=false` so they don't stamp messages with a class name from their own package; each `@KafkaListener` instead pins `spring.json.value.default.type` to its own local class.
 
 ## Message shapes
 
@@ -92,18 +110,19 @@ mission shapes below are illustrative ahead of Phases 2–4.
 ```
 `status` codes: `IN_FLIGHT`, `IDLE`, `LOW_BATTERY`, `LOST_SIGNAL`, `LANDED`.
 
-### Alert (`drone.alerts`, Phase 2/3)
+### Alert (`drone.alerts`, produced by alert-service since Phase 3)
 ```json
 {
-  "alertId": "alert-88",
+  "alertId": 88,
   "droneId": "drone-017",
   "type": "GEOFENCE_BREACH",
   "severity": "HIGH",
-  "timestamp": "2026-01-15T10:32:05.000Z",
-  "details": "Drone left permitted operating area"
+  "message": "Drone drone-017 left the permitted operating area",
+  "triggeredAt": "2026-01-15T10:32:05.000Z",
+  "resolvedAt": null
 }
 ```
-`type` codes: `GEOFENCE_BREACH`, `LOW_BATTERY`, `CRITICAL_BATTERY`,
+`resolvedAt == null` means the alert is still active. `type` codes: `GEOFENCE_BREACH`, `LOW_BATTERY`, `CRITICAL_BATTERY`,
 `ALTITUDE_VIOLATION`, `LOST_SIGNAL`.
 
 ### Mission (`mission.events`, Phase 4)
@@ -129,7 +148,7 @@ mission shapes below are illustrative ahead of Phases 2–4.
 - **Frontend:** Vite + React + TypeScript, Tailwind CSS v4 + **shadcn/ui** (`radix-nova` style, RTL mode enabled via `components.json`), react-leaflet, `@stomp/stompjs` + `sockjs-client`, react-i18next (`ar` bundle), `@fontsource/cairo` (bundled offline, no CDN)
 - **Language rule:** all user-facing strings Arabic (RTL); code, API paths, Kafka topic names, JSON field names, and enum codes stay English; frontend maps codes → Arabic labels
 
-### Service ports (to be finalized at scaffold)
+### Service ports
 
 | Service | Port |
 |---|---|

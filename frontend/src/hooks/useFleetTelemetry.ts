@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Client, type IMessage } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
-import type { DroneTelemetry, FleetTelemetryMessage } from "../types/drone";
+import type { DroneTelemetry } from "../types/drone";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8082/ws";
+// Phase 3: telemetry-service (not simulator-service) hosts the WebSocket -
+// it's the Kafka consumer that relays drone.telemetry to the frontend.
+const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8083/ws";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -20,13 +22,12 @@ export function useFleetTelemetry() {
         setStatus("connected");
         client.subscribe("/topic/telemetry", (message: IMessage) => {
           try {
-            const payload: FleetTelemetryMessage | DroneTelemetry[] = JSON.parse(message.body);
-            const list: DroneTelemetry[] = Array.isArray(payload) ? payload : payload.drones;
+            // Phase 3: one drone.telemetry Kafka message per drone per tick,
+            // relayed as a single frame rather than a whole-fleet batch.
+            const frame: DroneTelemetry = JSON.parse(message.body);
             setDrones((prev) => {
               const next = new Map(prev);
-              for (const d of list) {
-                next.set(d.droneId, d);
-              }
+              next.set(frame.droneId, frame);
               return next;
             });
           } catch (err) {

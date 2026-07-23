@@ -3,15 +3,17 @@ import { Client, type IMessage } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import type { AlertRecord } from "../types/alert";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8082/ws";
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8082";
+// Phase 3: telemetry-service relays drone.alerts over the same WebSocket as
+// telemetry; alert-service (which owns the alerts table) serves the REST seed.
+const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8083/ws";
+const ALERTS_API_URL = import.meta.env.VITE_ALERTS_API_URL ?? "http://localhost:8084";
 
 export function useAlerts() {
   const [alerts, setAlerts] = useState<Map<number, AlertRecord>>(new Map());
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/alerts/active`)
+    fetch(`${ALERTS_API_URL}/api/alerts/active`)
       .then((res) => res.json())
       .then((initial: AlertRecord[]) => {
         setAlerts((prev) => {

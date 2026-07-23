@@ -20,8 +20,3 @@ export interface DroneTelemetry {
   missionId: string | null;
   status: DroneStatus;
 }
-
-// The simulator broadcasts the whole fleet's state on every tick.
-export interface FleetTelemetryMessage {
-  drones: DroneTelemetry[];
-}

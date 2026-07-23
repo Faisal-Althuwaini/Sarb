@@ -1,31 +1,32 @@
 package com.dronefleet.simulator.simulation;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 import jakarta.annotation.PostConstruct;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.dronefleet.simulator.alert.AlertRuleEngine;
 import com.dronefleet.simulator.config.SimulatorProperties;
 import com.dronefleet.simulator.geo.GeoMath;
 import com.dronefleet.simulator.model.Drone;
 import com.dronefleet.simulator.model.DroneStatus;
 import com.dronefleet.simulator.model.TelemetryFrame;
-import com.dronefleet.simulator.persistence.FlightLogWriter;
 import com.dronefleet.simulator.registry.DroneRegistry;
 
 /**
  * Seeds the virtual fleet around the demo center (Riyadh) and, on a fixed
  * tick, advances each in-flight drone along its heading with slight jitter,
- * drains battery, keeps drones roughly within the demo area, and broadcasts
- * the whole fleet's telemetry to {@code /topic/telemetry} (brief Section 8).
+ * drains battery, keeps drones roughly within the demo area, and produces
+ * one {@code drone.telemetry} Kafka message per drone, keyed by droneId so
+ * per-drone ordering is preserved across partitions (brief Section 8; Phase 3
+ * fan-out - independent consumers pick this up for WebSocket push, flight
+ * logging, and alert rules).
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -37,9 +38,10 @@ public class SimulationEngineImpl implements SimulationEngine {
 
 	private final SimulatorProperties properties;
 	private final DroneRegistry registry;
-	private final SimpMessagingTemplate messagingTemplate;
-	private final FlightLogWriter flightLogWriter;
-	private final AlertRuleEngine alertRuleEngine;
+	private final KafkaTemplate<String, TelemetryFrame> kafkaTemplate;
+
+	@Value("${sarb.kafka.topics.telemetry}")
+	private String telemetryTopic;
 
 	@Override
 	@PostConstruct
@@ -78,12 +80,8 @@ public class SimulationEngineImpl implements SimulationEngine {
 
 		for (Drone drone : registry.all()) {
 			advance(drone, rnd, tickSeconds);
-			alertRuleEngine.evaluate(drone);
+			kafkaTemplate.send(telemetryTopic, drone.getDroneId(), TelemetryFrame.from(drone));
 		}
-
-		List<TelemetryFrame> frames = registry.all().stream().map(TelemetryFrame::from).toList();
-		messagingTemplate.convertAndSend("/topic/telemetry", frames);
-		flightLogWriter.record(registry.all());
 	}
 
 	private void advance(Drone drone, ThreadLocalRandom rnd, double tickSeconds) {
