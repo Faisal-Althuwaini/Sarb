@@ -1,12 +1,15 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { AlertsPanel } from "./components/AlertsPanel";
 import { DroneMap } from "./components/DroneMap";
+import { useAlerts } from "./hooks/useAlerts";
 import { useFleetTelemetry } from "./hooks/useFleetTelemetry";
 import { Badge } from "@/components/ui/badge";
 
 function App() {
   const { t } = useTranslation();
   const { drones, status } = useFleetTelemetry();
+  const { alerts } = useAlerts();
   const droneList = useMemo(() => Array.from(drones.values()), [drones]);
 
   const statusVariant =
@@ -26,8 +29,13 @@ function App() {
         </Badge>
         <Badge variant="outline">{t("map.droneCount", { count: droneList.length })}</Badge>
       </header>
-      <main className="min-h-0 flex-1">
-        <DroneMap drones={droneList} />
+      <main className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <DroneMap drones={droneList} />
+        </div>
+        <aside className="w-80 shrink-0">
+          <AlertsPanel alerts={alerts} />
+        </aside>
       </main>
     </div>
   );

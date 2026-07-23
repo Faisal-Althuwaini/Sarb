@@ -12,10 +12,13 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.dronefleet.simulator.alert.AlertRuleEngine;
 import com.dronefleet.simulator.config.SimulatorProperties;
+import com.dronefleet.simulator.geo.GeoMath;
 import com.dronefleet.simulator.model.Drone;
 import com.dronefleet.simulator.model.DroneStatus;
 import com.dronefleet.simulator.model.TelemetryFrame;
+import com.dronefleet.simulator.persistence.FlightLogWriter;
 import com.dronefleet.simulator.registry.DroneRegistry;
 
 /**
@@ -29,15 +32,14 @@ import com.dronefleet.simulator.registry.DroneRegistry;
 @Component
 public class SimulationEngineImpl implements SimulationEngine {
 
-	/** Meters per degree of latitude (approximately constant everywhere). */
-	private static final double METERS_PER_DEGREE_LAT = 111_320.0;
-
 	private static final double LOW_BATTERY_THRESHOLD = 25.0;
 	private static final double CRITICAL_BATTERY_THRESHOLD = 8.0;
 
 	private final SimulatorProperties properties;
 	private final DroneRegistry registry;
 	private final SimpMessagingTemplate messagingTemplate;
+	private final FlightLogWriter flightLogWriter;
+	private final AlertRuleEngine alertRuleEngine;
 
 	@Override
 	@PostConstruct
@@ -76,10 +78,12 @@ public class SimulationEngineImpl implements SimulationEngine {
 
 		for (Drone drone : registry.all()) {
 			advance(drone, rnd, tickSeconds);
+			alertRuleEngine.evaluate(drone);
 		}
 
 		List<TelemetryFrame> frames = registry.all().stream().map(TelemetryFrame::from).toList();
 		messagingTemplate.convertAndSend("/topic/telemetry", frames);
+		flightLogWriter.record(registry.all());
 	}
 
 	private void advance(Drone drone, ThreadLocalRandom rnd, double tickSeconds) {
@@ -93,24 +97,26 @@ public class SimulationEngineImpl implements SimulationEngine {
 		// Jitter the heading a little each tick so movement looks natural,
 		// not perfectly straight-line.
 		double jitterDeg = rnd.nextDouble(-8.0, 8.0);
-		double headingDeg = normalizeDegrees(drone.getHeadingDeg() + jitterDeg);
+		double headingDeg = GeoMath.normalizeDegrees(drone.getHeadingDeg() + jitterDeg);
 
 		double distanceM = drone.getSpeedMps() * tickSeconds;
 		double headingRad = Math.toRadians(headingDeg);
-		double metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos(Math.toRadians(drone.getLat()));
+		double metersPerDegreeLon = GeoMath.metersPerDegreeLat() * Math.cos(Math.toRadians(drone.getLat()));
 
-		double newLat = drone.getLat() + (distanceM * Math.cos(headingRad)) / METERS_PER_DEGREE_LAT;
+		double newLat = drone.getLat() + (distanceM * Math.cos(headingRad)) / GeoMath.metersPerDegreeLat();
 		double newLon = drone.getLon() + (distanceM * Math.sin(headingRad)) / metersPerDegreeLon;
 
 		// Keep drones roughly within the demo area: once beyond the spread
 		// radius, steer back toward the center instead of wandering off.
-		double distanceFromCenterKm = haversineKm(properties.centerLat(), properties.centerLon(), newLat,
+		// (The alert engine still raises GEOFENCE_BREACH on genuine drift -
+		// this bias just keeps the simulated fleet visually near Riyadh.)
+		double distanceFromCenterKm = GeoMath.haversineKm(properties.centerLat(), properties.centerLon(), newLat,
 				newLon);
 		if (distanceFromCenterKm > properties.spreadRadiusKm()) {
-			headingDeg = normalizeDegrees(bearingDegrees(newLat, newLon, properties.centerLat(),
+			headingDeg = GeoMath.normalizeDegrees(GeoMath.bearingDegrees(newLat, newLon, properties.centerLat(),
 					properties.centerLon()) + rnd.nextDouble(-10.0, 10.0));
 			headingRad = Math.toRadians(headingDeg);
-			newLat = drone.getLat() + (distanceM * Math.cos(headingRad)) / METERS_PER_DEGREE_LAT;
+			newLat = drone.getLat() + (distanceM * Math.cos(headingRad)) / GeoMath.metersPerDegreeLat();
 			newLon = drone.getLon() + (distanceM * Math.sin(headingRad)) / metersPerDegreeLon;
 		}
 
@@ -132,37 +138,13 @@ public class SimulationEngineImpl implements SimulationEngine {
 		}
 	}
 
-	private static double normalizeDegrees(double deg) {
-		double d = deg % 360.0;
-		return d < 0 ? d + 360.0 : d;
-	}
-
 	private static double[] randomPointWithinRadius(ThreadLocalRandom rnd, double centerLat, double centerLon,
 			double radiusKm) {
 		double r = radiusKm * Math.sqrt(rnd.nextDouble());
 		double theta = rnd.nextDouble(0, 2 * Math.PI);
-		double deltaLat = (r * Math.cos(theta)) / (METERS_PER_DEGREE_LAT / 1000.0);
-		double deltaLon = (r * Math.sin(theta)) / ((METERS_PER_DEGREE_LAT / 1000.0) * Math.cos(Math.toRadians(centerLat)));
+		double metersPerDegreeLatKm = GeoMath.metersPerDegreeLat() / 1000.0;
+		double deltaLat = (r * Math.cos(theta)) / metersPerDegreeLatKm;
+		double deltaLon = (r * Math.sin(theta)) / (metersPerDegreeLatKm * Math.cos(Math.toRadians(centerLat)));
 		return new double[] { centerLat + deltaLat, centerLon + deltaLon };
-	}
-
-	private static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-		double r = 6371.0;
-		double dLat = Math.toRadians(lat2 - lat1);
-		double dLon = Math.toRadians(lon2 - lon1);
-		double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-				+ Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-						* Math.sin(dLon / 2) * Math.sin(dLon / 2);
-		double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-		return r * c;
-	}
-
-	private static double bearingDegrees(double fromLat, double fromLon, double toLat, double toLon) {
-		double lat1 = Math.toRadians(fromLat);
-		double lat2 = Math.toRadians(toLat);
-		double dLon = Math.toRadians(toLon - fromLon);
-		double y = Math.sin(dLon) * Math.cos(lat2);
-		double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-		return normalizeDegrees(Math.toDegrees(Math.atan2(y, x)));
 	}
 }

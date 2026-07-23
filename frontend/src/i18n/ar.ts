@@ -35,6 +35,22 @@ export const ar = {
       LOST_SIGNAL: "انقطاع الإشارة",
       LANDED: "هابطة",
     },
+    alerts: {
+      title: "التنبيهات",
+      empty: "لا توجد تنبيهات نشطة",
+      active: "نشط",
+      resolved: "تمت المعالجة",
+      type: {
+        GEOFENCE_BREACH: "تجاوز المنطقة المسموحة",
+        ALTITUDE_VIOLATION: "تجاوز الحد الأقصى للارتفاع",
+        LOW_BATTERY: "بطارية منخفضة",
+        CRITICAL_BATTERY: "بطارية حرجة",
+      },
+      severity: {
+        MEDIUM: "متوسط",
+        HIGH: "عالٍ",
+      },
+    },
   },
 };
 
