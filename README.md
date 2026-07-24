@@ -40,21 +40,49 @@ directly to get the visible demo working fast, before Kafka was introduced.
 
 ## Architecture at a glance
 
-```
-Frontend (React, live map, Arabic RTL)
-  --STOMP/WebSocket (JWT on CONNECT)--> Telemetry Service
-       (relays /topic/telemetry + /topic/alerts + /topic/missions)
-  --REST (JWT: Bearer token)-------------------> Gateway
-                                                    |-- Auth Service     /api/auth/**    (public)
-                                                    |-- Alert Service    /api/alerts/**
-                                                    |-- Mission Service  /api/missions/**
-                                                    '-- RAG Service      /api/assistant/**
+```mermaid
+flowchart LR
+  FE["Frontend<br/>shadcn/ui · Arabic RTL · Leaflet"]
+  GW["Gateway<br/>Spring Cloud Gateway (MVC) · JWT filter"]
+  AUTH["Auth Service<br/>register/login · issues JWT"]
+  SIM["Simulator Service<br/>tick loop · flies assigned routes"]
+  T1(["drone.telemetry"])
+  T2(["drone.alerts"])
+  T3(["mission.events"])
+  TEL["Telemetry Service<br/>consumes all 3 topics · STOMP host · checks JWT on CONNECT"]
+  ALERT["Alert Service<br/>consumes drone.telemetry · rule engine · produces drone.alerts"]
+  MIS["Mission Service<br/>mission CRUD · produces ASSIGNED/CANCELLED"]
+  RAG["RAG Service<br/>Spring AI · Claude + Ollama + pgvector"]
+  PG[("PostgreSQL")]
+  OLLAMA["Ollama (host)<br/>bge-m3 embeddings"]
+  CLAUDE["Claude API"]
 
-Simulator --> drone.telemetry (Kafka) --+--> Telemetry Service (WS push + flight-log write)
-                                         '--> Alert Service (rules) --> drone.alerts (Kafka) --> Telemetry Service
-Mission Service <--> mission.events (Kafka) <--> Simulator (flies assigned routes)
-RAG Service <--> Postgres/pgvector, Ollama (embeddings), Claude API
+  SIM -->|produces| T1
+  T1 --> TEL
+  T1 --> ALERT
+  ALERT -->|produces| T2
+  T2 --> TEL
+  MIS -->|produces ASSIGNED/CANCELLED| T3
+  T3 --> SIM
+  SIM -->|produces STARTED/COMPLETED| T3
+  T3 --> TEL
+  T3 --> MIS
+  FE -->|"STOMP /topic/telemetry, /topic/alerts, /topic/missions (JWT on CONNECT)"| TEL
+  FE -->|"REST, JWT: Bearer token"| GW
+  GW -->|"/api/auth/** (public)"| AUTH
+  GW -->|"/api/alerts/**"| ALERT
+  GW -->|"/api/missions/**"| MIS
+  GW -->|"/api/assistant/**"| RAG
+  RAG -->|embed query + chunks| OLLAMA
+  RAG -->|chat completion| CLAUDE
+  RAG -->|"similarity search · rag.vector_store"| PG
+  TEL -->|flight_logs| PG
+  ALERT -->|alerts| PG
+  MIS -->|missions| PG
+  AUTH -->|users| PG
 ```
+
+Same diagram, with more prose, lives in [`docs/architecture.md`](./docs/architecture.md).
 
 ## Repo layout
 
