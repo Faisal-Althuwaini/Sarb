@@ -4,9 +4,10 @@ import type { AssistantAnswer, ChatTurn } from "../types/assistant";
 // Phase 5: rag-service is REST-only (no WebSocket) - a question/answer round
 // trip through Claude + pgvector retrieval takes a few seconds, so each turn
 // starts "pending" and flips to "done"/"error" once the response lands.
-const ASSISTANT_API_URL = import.meta.env.VITE_ASSISTANT_API_URL ?? "http://localhost:8086";
+// Phase 6: the request now goes through the gateway, which enforces the JWT.
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? "http://localhost:8080";
 
-export function useAssistant() {
+export function useAssistant(token: string | null) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
 
   const ask = async (question: string) => {
@@ -14,9 +15,9 @@ export function useAssistant() {
     setTurns((prev) => [...prev, { id, question, answer: null, citations: [], status: "pending" }]);
 
     try {
-      const res = await fetch(`${ASSISTANT_API_URL}/api/assistant/ask`, {
+      const res = await fetch(`${GATEWAY_URL}/api/assistant/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ question }),
       });
       if (!res.ok) throw new Error(`rag-service responded ${res.status}`);

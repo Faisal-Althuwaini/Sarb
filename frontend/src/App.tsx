@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { AssistantPanel } from "./components/AssistantPanel";
 import { DroneMap } from "./components/DroneMap";
+import { LoginScreen } from "./components/LoginScreen";
 import { MissionsPanel } from "./components/MissionsPanel";
 import { useAlerts } from "./hooks/useAlerts";
 import { useAssistant } from "./hooks/useAssistant";
+import { useAuth } from "./hooks/useAuth";
 import { useFleetTelemetry } from "./hooks/useFleetTelemetry";
 import { useMissions } from "./hooks/useMissions";
 import type { Waypoint } from "./types/mission";
@@ -18,10 +20,11 @@ const DEFAULT_WAYPOINT_ALTITUDE_M = 80;
 
 function App() {
   const { t } = useTranslation();
-  const { drones, status } = useFleetTelemetry();
-  const { alerts } = useAlerts();
-  const { missions, createMission, cancelMission } = useMissions();
-  const { turns, ask } = useAssistant();
+  const { token, username, login, register, logout, error: authError, loading: authLoading } = useAuth();
+  const { drones, status } = useFleetTelemetry(token);
+  const { alerts } = useAlerts(token);
+  const { missions, createMission, cancelMission } = useMissions(token);
+  const { turns, ask } = useAssistant(token);
   const droneList = useMemo(() => Array.from(drones.values()), [drones]);
 
   const [pickingDroneId, setPickingDroneId] = useState<string | null>(null);
@@ -52,6 +55,10 @@ function App() {
     cancelMission(missionId).catch((err) => console.error("Failed to cancel mission", err));
   };
 
+  if (!token) {
+    return <LoginScreen onLogin={login} onRegister={register} error={authError} loading={authLoading} />;
+  }
+
   return (
     <div className="flex h-svh w-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-4 border-b bg-card px-6 py-3">
@@ -68,6 +75,12 @@ function App() {
         <Button size="sm" variant="secondary" onClick={() => setAssistantOpen((v) => !v)}>
           {t("assistant.openButton")}
         </Button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{username}</span>
+          <Button size="sm" variant="ghost" onClick={logout}>
+            {t("auth.logout")}
+          </Button>
+        </div>
       </header>
       <main className="relative flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">

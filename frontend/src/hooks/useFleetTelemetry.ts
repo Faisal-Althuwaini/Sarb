@@ -5,18 +5,24 @@ import type { DroneTelemetry } from "../types/drone";
 
 // Phase 3: telemetry-service (not simulator-service) hosts the WebSocket -
 // it's the Kafka consumer that relays drone.telemetry to the frontend.
+// Phase 6: this connection bypasses the gateway (WebSocket proxying isn't
+// supported by Spring Cloud Gateway's MVC variant) - the JWT is sent as a
+// STOMP CONNECT header instead and checked directly by telemetry-service.
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8083/ws";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-export function useFleetTelemetry() {
+export function useFleetTelemetry(token: string | null) {
   const [drones, setDrones] = useState<Map<string, DroneTelemetry>>(new Map());
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
+    if (!token) return;
+
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL) as WebSocket,
+      connectHeaders: { Authorization: `Bearer ${token}` },
       reconnectDelay: 2000,
       onConnect: () => {
         setStatus("connected");
@@ -45,7 +51,7 @@ export function useFleetTelemetry() {
     return () => {
       client.deactivate();
     };
-  }, []);
+  }, [token]);
 
   return { drones, status };
 }

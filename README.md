@@ -17,10 +17,13 @@ full design brief (goals, architecture, settled decisions, build phases) and
 
 ## Status
 
-Building incrementally, phase by phase (see brief Section 17 for the full
-checklist). Currently complete: **Phase 0** (repo skeleton, infra, health
-checks) and **Phase 1** (simulator + live map — drones visibly moving in
-real time over WebSocket).
+Built incrementally, phase by phase (see brief Section 17 for the full
+checklist). **Phases 0–6 are done**: live simulator + map, persistence +
+alert rules, Kafka fan-out, missions, a RAG regulatory assistant, and — as of
+Phase 6 — JWT auth, an API gateway in front of everything, and a single
+`docker compose up` that brings the whole stack up together. Phase 7
+(replay, analytics, deconfliction, NL telemetry queries) is optional stretch
+and not started.
 
 ## Why Kafka?
 
@@ -36,12 +39,17 @@ fast.
 ## Architecture at a glance
 
 ```
-Simulator (N virtual drones, tick loop)
-   --STOMP/WebSocket--> Frontend (React, live map)        [Phase 1, done]
+Frontend (React, live map, Arabic RTL)
+  --STOMP/WebSocket (JWT on CONNECT)--> Telemetry Service      [Phase 1/3/6]
+  --REST (JWT: Bearer token)-------------------> Gateway       [Phase 6]
+                                                    |-- Auth Service (issues JWT)
+                                                    |-- Alert Service
+                                                    |-- Mission Service
+                                                    '-- RAG Service (Claude + pgvector)
 
-Simulator --> drone.telemetry (Kafka) --> Telemetry / Alert / Flight-log      [Phase 3]
-Mission Service --> mission.events (Kafka)                                    [Phase 4]
-RAG Service <--> Postgres/pgvector, Claude API                                [Phase 5]
+Simulator --> drone.telemetry (Kafka) --> Telemetry / Alert / Flight-log     [Phase 3]
+Mission Service --> mission.events (Kafka)                                   [Phase 4]
+RAG Service <--> Postgres/pgvector, Ollama (embeddings), Claude API          [Phase 5]
 ```
 
 Full Mermaid diagrams: [`docs/architecture.md`](./docs/architecture.md).
@@ -50,14 +58,14 @@ Full Mermaid diagrams: [`docs/architecture.md`](./docs/architecture.md).
 
 ```
 Sarb/
-├── docker-compose.yml       # infra only: Postgres+pgvector, Kafka (KRaft), kafka-ui
-├── gateway/                 # API gateway (stub — Phase 6)
-├── auth-service/            # JWT auth (stub — Phase 6)
-├── simulator-service/       # REAL: N virtual drones, tick loop, STOMP/WebSocket (Phase 1)
-├── telemetry-service/       # stub — split out from simulator at Phase 3
-├── alert-service/           # stub — geofence/battery/signal rules at Phase 2/3
-├── mission-service/         # stub — missions at Phase 4
-├── rag-service/             # stub — Spring AI RAG assistant at Phase 5
+├── docker-compose.yml       # Postgres+pgvector, Kafka (KRaft), kafka-ui, and all 7 services + frontend
+├── gateway/                 # Spring Cloud Gateway (MVC) - JWT-gated routing to every backend
+├── auth-service/            # Hand-rolled JWT auth (register/login, BCrypt, Postgres)
+├── simulator-service/       # N virtual drones, tick loop, flies assigned missions
+├── telemetry-service/       # Kafka consumer -> STOMP/WebSocket host, flight-log writer
+├── alert-service/           # geofence/battery/signal rule engine
+├── mission-service/         # mission CRUD + lifecycle events
+├── rag-service/             # Spring AI RAG assistant (Claude + Ollama + pgvector)
 ├── frontend/                # Vite + React + TS, shadcn/ui, Arabic RTL, Leaflet
 └── docs/
     └── architecture.md
@@ -66,62 +74,66 @@ Sarb/
 ## Stack
 
 - **Backend:** Java 21, Spring Boot 4.1 (Maven, `application.properties`)
-- **Real-time:** STOMP over SockJS (`/ws`, broker `/topic`, telemetry on `/topic/telemetry`)
+- **Gateway:** Spring Cloud Gateway Server MVC (servlet, non-reactive variant)
+- **Auth:** hand-rolled JWT (jjwt), BCrypt via Spring Security
+- **Real-time:** STOMP over SockJS (`/ws`, broker `/topic`, telemetry on `/topic/telemetry`) - the one thing that bypasses the gateway (see `docs/architecture.md`)
 - **Frontend:** Vite + React + TypeScript, Tailwind CSS + shadcn/ui, react-leaflet, react-i18next (`ar` bundle), `@fontsource/cairo`
-- **Messaging (from Phase 3):** Apache Kafka (KRaft mode, no Zookeeper)
-- **Data (from Phase 2):** PostgreSQL + pgvector
-- **AI (from Phase 5):** Spring AI — Claude (Anthropic) chat + OpenAI embeddings, `PgVectorStore`
+- **Messaging:** Apache Kafka (KRaft mode, no Zookeeper)
+- **Data:** PostgreSQL + pgvector
+- **AI:** Spring AI - Claude (Anthropic) chat + Ollama (`bge-m3`) embeddings, `PgVectorStore`
+- **Deployment:** one Dockerfile per service, `docker compose up` for the whole stack
 
 ## Running it
 
-### Prerequisites
-- Java 21 (each service ships its own Maven wrapper — no local Maven install needed)
-- Node.js 20+ and npm
-- Docker + Docker Compose (for Postgres/Kafka; not required just to see the live map)
+### Option A — `docker compose up` (everything, one command)
 
-### 1. Infra (optional for Phase 1 — the simulator needs no database or Kafka yet)
+**Prerequisites:** Docker + Docker Compose, and [Ollama](https://ollama.com)
+running on the host with the `bge-m3` model pulled (`ollama pull bge-m3`) -
+it's the one dependency that isn't dockerized, since it's a local install
+rather than one of this project's own services.
+
 ```bash
-docker compose up -d
+cp .env.example .env   # fill in JWT_SECRET and ANTHROPIC_API_KEY
+docker compose up -d --build
 docker compose ps
 ```
 
-### 2. Simulator (the hook — drones moving on the map)
-```bash
-cd simulator-service
-./mvnw spring-boot:run
-```
-Health check: `curl localhost:8082/actuator/health` → `{"status":"UP", ...}`
+Open **http://localhost:5173**, register an account, and the whole system
+is live: drones moving on the map, alerts, missions, and the RAG assistant.
 
-### 3. Frontend
+### Option B — run services individually (development)
+
+Each service has its own Maven wrapper, a `.env.example` to copy from where
+relevant, and a health endpoint on its own port:
+
+| Service | Port | Needs its own `.env`? |
+|---|---|---|
+| gateway | 8080 | yes - `JWT_SECRET` (must match auth-service's) |
+| auth-service | 8081 | yes - `JWT_SECRET` |
+| simulator-service | 8082 | no |
+| telemetry-service | 8083 | yes - `JWT_SECRET` (checks it on the STOMP CONNECT frame) |
+| alert-service | 8084 | no |
+| mission-service | 8085 | no |
+| rag-service | 8086 | yes - `ANTHROPIC_API_KEY` |
+| frontend (dev) | 5173 | no |
+
+```bash
+docker compose up -d postgres kafka   # infra only
+cd <service> && cp .env.example .env  # where applicable - fill in the real value
+cd <service> && ./mvnw spring-boot:run
+curl localhost:<port>/actuator/health
+```
+
+Frontend:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Open **http://localhost:5173** — the map centers on Riyadh and drones should
-appear moving within a few seconds as telemetry streams in over STOMP/WebSocket.
-
-### 4. The other stub services (optional at this phase)
-Each has its own Maven wrapper and a health endpoint on its own port:
-
-| Service | Port |
-|---|---|
-| gateway | 8080 |
-| auth-service | 8081 |
-| simulator-service | 8082 |
-| telemetry-service | 8083 |
-| alert-service | 8084 |
-| mission-service | 8085 |
-| rag-service | 8086 |
-| frontend (dev) | 5173 |
-
-```bash
-cd <service>
-./mvnw spring-boot:run
-curl localhost:<port>/actuator/health
-```
 
 ## License / disclaimer
 
-Portfolio project. The RAG assistant (Phase 5) cites public regulatory
-documents for demonstration purposes only — it is not legal advice.
+Portfolio project. The RAG assistant cites public regulatory documents for
+demonstration purposes only — it is not legal advice. Auth is a portfolio
+demo of the JWT pattern (no password reset, no refresh tokens, no rate
+limiting) - not production-hardened.

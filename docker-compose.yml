@@ -1,7 +1,16 @@
 name: sarb
 
-# Phase 0/1: infra only. Services (gateway, auth, simulator, telemetry, alert,
-# mission, rag, frontend) run locally via Maven/npm until Phase 6 dockerizes them.
+# Phase 6: every service is dockerized - `docker compose up` brings the whole
+# stack up together. JWT_SECRET and ANTHROPIC_API_KEY come from a root .env
+# file (see .env.example) that docker-compose reads automatically for ${VAR}
+# substitution below - separate from each service's own gitignored .env used
+# by DotenvEnvironmentPostProcessor when running via `mvnw spring-boot:run`
+# on the host instead. Each app service loads an application-docker.properties
+# profile (SPRING_PROFILES_ACTIVE=docker) that overrides the localhost-port
+# defaults with container-network hostnames (postgres:5432, kafka:29092,
+# service names for gateway's routes). Ollama isn't dockerized (it's a local
+# brew install, not part of this project's own services), so rag-service
+# reaches it via Docker Desktop's host.docker.internal instead.
 
 services:
   postgres:
@@ -67,6 +76,111 @@ services:
       KAFKA_CLUSTERS_0_NAME: sarb
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
+
+  auth-service:
+    build: ./auth-service
+    container_name: sarb-auth-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JWT_SECRET: ${JWT_SECRET}
+
+  gateway:
+    build: ./gateway
+    container_name: sarb-gateway
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - alert-service
+      - mission-service
+      - rag-service
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JWT_SECRET: ${JWT_SECRET}
+
+  simulator-service:
+    build: ./simulator-service
+    container_name: sarb-simulator-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+  telemetry-service:
+    build: ./telemetry-service
+    container_name: sarb-telemetry-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JWT_SECRET: ${JWT_SECRET}
+
+  alert-service:
+    build: ./alert-service
+    container_name: sarb-alert-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+  mission-service:
+    build: ./mission-service
+    container_name: sarb-mission-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+  rag-service:
+    build: ./rag-service
+    container_name: sarb-rag-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+  frontend:
+    build: ./frontend
+    container_name: sarb-frontend
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "5173:80"
 
 volumes:
   sarb-postgres-data:

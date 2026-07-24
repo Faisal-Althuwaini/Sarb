@@ -6,8 +6,10 @@ import type { Mission, MissionEvent, Waypoint } from "../types/mission";
 // Phase 4: telemetry-service relays mission.events over the same WebSocket as
 // telemetry/alerts; mission-service (which owns the missions table) serves
 // the REST API for the initial list and for create/cancel actions.
+// Phase 6: REST calls go through the gateway; the WebSocket still connects
+// directly to telemetry-service (see useFleetTelemetry).
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8083/ws";
-const MISSIONS_API_URL = import.meta.env.VITE_MISSIONS_API_URL ?? "http://localhost:8085";
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? "http://localhost:8080";
 
 function applyEvent(missions: Map<number, Mission>, event: MissionEvent): Map<number, Mission> {
   const next = new Map(missions);
@@ -46,12 +48,14 @@ function applyEvent(missions: Map<number, Mission>, event: MissionEvent): Map<nu
   return next;
 }
 
-export function useMissions() {
+export function useMissions(token: string | null) {
   const [missions, setMissions] = useState<Map<number, Mission>>(new Map());
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
-    fetch(`${MISSIONS_API_URL}/api/missions`)
+    if (!token) return;
+
+    fetch(`${GATEWAY_URL}/api/missions`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
       .then((initial: Mission[]) => {
         setMissions((prev) => {
@@ -66,6 +70,7 @@ export function useMissions() {
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL) as WebSocket,
+      connectHeaders: { Authorization: `Bearer ${token}` },
       reconnectDelay: 2000,
       onConnect: () => {
         client.subscribe("/topic/missions", (message: IMessage) => {
@@ -85,12 +90,12 @@ export function useMissions() {
     return () => {
       client.deactivate();
     };
-  }, []);
+  }, [token]);
 
   const createMission = useCallback(async (droneId: string, waypoints: Waypoint[]) => {
-    const res = await fetch(`${MISSIONS_API_URL}/api/missions`, {
+    const res = await fetch(`${GATEWAY_URL}/api/missions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ droneId, waypoints }),
     });
     if (!res.ok) {
@@ -99,17 +104,20 @@ export function useMissions() {
     const mission: Mission = await res.json();
     setMissions((prev) => new Map(prev).set(mission.missionId, mission));
     return mission;
-  }, []);
+  }, [token]);
 
   const cancelMission = useCallback(async (missionId: number) => {
-    const res = await fetch(`${MISSIONS_API_URL}/api/missions/${missionId}/cancel`, { method: "POST" });
+    const res = await fetch(`${GATEWAY_URL}/api/missions/${missionId}/cancel`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!res.ok) {
       throw new Error(`Failed to cancel mission: ${res.status}`);
     }
     const mission: Mission = await res.json();
     setMissions((prev) => new Map(prev).set(mission.missionId, mission));
     return mission;
-  }, []);
+  }, [token]);
 
   return { missions, createMission, cancelMission };
 }

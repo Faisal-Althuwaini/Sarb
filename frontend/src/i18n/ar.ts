@@ -66,6 +66,23 @@ export const ar = {
         sop: "إجراء داخلي",
       },
     },
+    auth: {
+      title: "سرب",
+      subtitle: "تسجيل الدخول لمتابعة الأسطول",
+      username: "اسم المستخدم",
+      password: "كلمة المرور",
+      login: "تسجيل الدخول",
+      register: "إنشاء حساب",
+      toggleToRegister: "ليس لديك حساب؟ أنشئ واحداً",
+      toggleToLogin: "لديك حساب بالفعل؟ سجّل الدخول",
+      logout: "تسجيل الخروج",
+      submitting: "جارٍ التحقق...",
+      errors: {
+        "invalid-credentials": "اسم المستخدم أو كلمة المرور غير صحيحة",
+        "username-taken": "اسم المستخدم مستخدم بالفعل",
+        unknown: "حدث خطأ، حاول مرة أخرى",
+      },
+    },
     mission: {
       title: "المهام",
       empty: "لا توجد مهام",

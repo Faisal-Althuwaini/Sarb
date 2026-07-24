@@ -5,15 +5,21 @@ import type { AlertRecord } from "../types/alert";
 
 // Phase 3: telemetry-service relays drone.alerts over the same WebSocket as
 // telemetry; alert-service (which owns the alerts table) serves the REST seed.
+// Phase 6: the REST call now goes through the gateway (which owns JWT
+// enforcement for every REST route); the WebSocket still connects directly
+// to telemetry-service (see useFleetTelemetry) with the JWT on the STOMP
+// CONNECT frame instead, since gateway can't proxy WebSocket upgrades.
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8083/ws";
-const ALERTS_API_URL = import.meta.env.VITE_ALERTS_API_URL ?? "http://localhost:8084";
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? "http://localhost:8080";
 
-export function useAlerts() {
+export function useAlerts(token: string | null) {
   const [alerts, setAlerts] = useState<Map<number, AlertRecord>>(new Map());
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
-    fetch(`${ALERTS_API_URL}/api/alerts/active`)
+    if (!token) return;
+
+    fetch(`${GATEWAY_URL}/api/alerts/active`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
       .then((initial: AlertRecord[]) => {
         setAlerts((prev) => {
@@ -28,6 +34,7 @@ export function useAlerts() {
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL) as WebSocket,
+      connectHeaders: { Authorization: `Bearer ${token}` },
       reconnectDelay: 2000,
       onConnect: () => {
         client.subscribe("/topic/alerts", (message: IMessage) => {
@@ -51,7 +58,7 @@ export function useAlerts() {
     return () => {
       client.deactivate();
     };
-  }, []);
+  }, [token]);
 
   return { alerts };
 }
