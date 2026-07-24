@@ -68,6 +68,7 @@ export const ar = {
     },
     auth: {
       title: "سرب",
+      consoleLabel: "وحدة تحكم عمليات الأسطول",
       subtitle: "تسجيل الدخول لمتابعة الأسطول",
       username: "اسم المستخدم",
       password: "كلمة المرور",

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { AlertRecord } from "../types/alert";
 import { alertSeverityBadgeVariant } from "../utils/alertVisuals";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,11 +28,13 @@ export function AlertsPanel({ alerts }: AlertsPanelProps) {
   );
 
   return (
-    <Card className="flex h-full min-h-0 flex-col rounded-none border-0 border-s">
+    <Card className="flex h-full min-h-0 flex-col rounded-none border-0 border-e">
       <CardHeader className="border-b pb-3">
         <CardTitle className="flex items-center justify-between">
           <span>{t("alerts.title")}</span>
-          <Badge variant="outline">{activeAlerts.length}</Badge>
+          <Badge variant={activeAlerts.length > 0 ? "destructive" : "outline"} className="font-mono">
+            {activeAlerts.length}
+          </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 px-0">
@@ -43,16 +46,24 @@ export function AlertsPanel({ alerts }: AlertsPanelProps) {
               {activeAlerts.map((alert) => (
                 <li
                   key={alert.alertId}
-                  className="rounded-lg border bg-card p-2.5 text-sm ring-1 ring-foreground/5"
+                  className={cn(
+                    "relative overflow-hidden rounded-sm border bg-card ps-3 pe-2.5 py-2 text-sm before:absolute before:inset-y-0 before:inset-s-0 before:w-0.5",
+                    alert.severity === "HIGH"
+                      ? "border-destructive/40 before:bg-destructive"
+                      : "border-caution/30 before:bg-caution",
+                  )}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <strong className="font-heading">{alert.droneId}</strong>
-                    <Badge variant={alertSeverityBadgeVariant(alert.severity)}>
+                    <strong className="font-mono text-xs tracking-wide text-foreground">{alert.droneId}</strong>
+                    <Badge
+                      variant={alertSeverityBadgeVariant(alert.severity)}
+                      className={alert.severity === "HIGH" ? "pulse-critical" : undefined}
+                    >
                       {t(`alerts.severity.${alert.severity}`)}
                     </Badge>
                   </div>
                   <p className="mt-1 text-foreground">{t(`alerts.type.${alert.type}`)}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 font-mono text-[0.7rem] text-muted-foreground">
                     {timeFormatter.format(new Date(alert.triggeredAt))}
                   </p>
                 </li>

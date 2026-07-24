@@ -54,7 +54,7 @@ export function MissionsPanel({
   }, [drones, missions]);
 
   return (
-    <Card className="flex h-full min-h-0 flex-col rounded-none border-0 border-s">
+    <Card className="flex h-full min-h-0 flex-col rounded-none border-0 border-e">
       <CardHeader className="border-b pb-3">
         <CardTitle className="flex items-center justify-between">
           <span>{t("mission.title")}</span>
@@ -67,7 +67,7 @@ export function MissionsPanel({
             <select
               value={selectedDroneId}
               onChange={(e) => setSelectedDroneId(e.target.value)}
-              className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-sm"
+              className="h-8 flex-1 rounded-sm border border-border bg-background px-2 font-mono text-sm"
             >
               <option value="" disabled>
                 {t("mission.selectDrone")}
@@ -87,9 +87,9 @@ export function MissionsPanel({
             </Button>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-2 rounded-lg border bg-card p-2 text-sm">
+          <div className="flex items-center justify-between gap-2 rounded-sm border border-primary/40 bg-card p-2 text-sm glow-primary">
             <div>
-              <p className="font-heading">{pickingDroneId}</p>
+              <p className="font-mono text-foreground">{pickingDroneId}</p>
               <p className="text-xs text-muted-foreground">
                 {t("mission.pickWaypoints")} — {t("mission.waypointCount", { count: draftWaypointCount })}
               </p>
@@ -113,10 +113,10 @@ export function MissionsPanel({
               {sortedMissions.map((mission) => (
                 <li
                   key={mission.missionId}
-                  className="rounded-lg border bg-card p-2.5 text-sm ring-1 ring-foreground/5"
+                  className="rounded-sm border bg-card p-2.5 text-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <strong className="font-heading">{mission.droneId}</strong>
+                    <strong className="font-mono text-xs tracking-wide text-foreground">{mission.droneId}</strong>
                     <Badge variant={missionStatusBadgeVariant(mission.status)}>
                       {t(`mission.status.${mission.status}`)}
                     </Badge>
@@ -125,7 +125,7 @@ export function MissionsPanel({
                     {t("mission.waypointCount", { count: mission.waypoints.length })}
                   </p>
                   <div className="mt-0.5 flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground">{timeFormatter.format(new Date(mission.createdAt))}</p>
+                    <p className="font-mono text-[0.7rem] text-muted-foreground">{timeFormatter.format(new Date(mission.createdAt))}</p>
                     {ACTIVE_STATUSES.includes(mission.status) && (
                       <Button size="xs" variant="destructive" onClick={() => onCancelMission(mission.missionId)}>
                         {t("mission.cancelMission")}

@@ -11,6 +11,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useFleetTelemetry } from "./hooks/useFleetTelemetry";
 import { useMissions } from "./hooks/useMissions";
 import type { Waypoint } from "./types/mission";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -66,35 +67,35 @@ function App() {
           <h1 className="font-heading text-xl font-bold text-foreground">{t("appName")}</h1>
           <p className="text-sm text-muted-foreground">{t("appTagline")}</p>
         </div>
-        <Badge variant={statusVariant} className="ms-auto">
-          {status === "connecting" && t("map.connecting")}
-          {status === "connected" && t("map.connected")}
-          {status === "disconnected" && t("map.disconnected")}
+        <div className="ms-auto flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-block size-2 rounded-full",
+              status === "connected" && "bg-primary shadow-[0_0_8px_1px_var(--primary)]",
+              status === "connecting" && "bg-caution pulse-critical",
+              status === "disconnected" && "bg-destructive pulse-critical",
+            )}
+          />
+          <Badge variant={statusVariant}>
+            {status === "connecting" && t("map.connecting")}
+            {status === "connected" && t("map.connected")}
+            {status === "disconnected" && t("map.disconnected")}
+          </Badge>
+        </div>
+        <Badge variant="outline" className="font-mono">
+          {t("map.droneCount", { count: droneList.length })}
         </Badge>
-        <Badge variant="outline">{t("map.droneCount", { count: droneList.length })}</Badge>
         <Button size="sm" variant="secondary" onClick={() => setAssistantOpen((v) => !v)}>
           {t("assistant.openButton")}
         </Button>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{username}</span>
+          <span className="font-mono text-sm text-muted-foreground">{username}</span>
           <Button size="sm" variant="ghost" onClick={logout}>
             {t("auth.logout")}
           </Button>
         </div>
       </header>
       <main className="relative flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <DroneMap
-            drones={droneList}
-            missions={Array.from(missions.values())}
-            pickingDroneId={pickingDroneId}
-            draftWaypoints={draftWaypoints}
-            onMapClick={handleMapClick}
-          />
-        </div>
-        {assistantOpen && (
-          <AssistantPanel turns={turns} onAsk={ask} onClose={() => setAssistantOpen(false)} />
-        )}
         <aside className="flex w-80 shrink-0 flex-col divide-y">
           <div className="min-h-0 flex-1">
             <AlertsPanel alerts={alerts} />
@@ -112,6 +113,18 @@ function App() {
             />
           </div>
         </aside>
+        <div className="min-w-0 flex-1">
+          <DroneMap
+            drones={droneList}
+            missions={Array.from(missions.values())}
+            pickingDroneId={pickingDroneId}
+            draftWaypoints={draftWaypoints}
+            onMapClick={handleMapClick}
+          />
+        </div>
+        {assistantOpen && (
+          <AssistantPanel turns={turns} onAsk={ask} onClose={() => setAssistantOpen(false)} />
+        )}
       </main>
     </div>
   );

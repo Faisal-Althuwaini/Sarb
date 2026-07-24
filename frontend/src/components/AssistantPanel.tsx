@@ -24,8 +24,8 @@ export function AssistantPanel({ turns, onAsk, onClose }: AssistantPanelProps) {
   };
 
   return (
-    <div className="absolute inset-y-0 inset-e-0 z-1100 w-96 max-w-full p-3">
-      <Card className="flex h-full min-h-0 flex-col shadow-xl ring-1 ring-foreground/10">
+    <div className="absolute inset-y-0 inset-s-0 z-1100 w-96 max-w-full p-3">
+      <Card className="glow-primary flex h-full min-h-0 flex-col shadow-xl">
         <CardHeader className="border-b pb-3">
           <CardTitle className="flex items-center justify-between">
             <span>{t("assistant.title")}</span>
@@ -42,21 +42,21 @@ export function AssistantPanel({ turns, onAsk, onClose }: AssistantPanelProps) {
               <ul className="flex flex-col gap-3 py-2">
                 {turns.map((turn) => (
                   <li key={turn.id} className="flex flex-col gap-1.5">
-                    <div className="self-end rounded-lg bg-primary/10 px-3 py-2 text-sm text-foreground">
+                    <div className="self-end rounded-sm bg-primary/10 px-3 py-2 text-sm text-foreground">
                       {turn.question}
                     </div>
                     {turn.status === "pending" && (
-                      <div className="self-start rounded-lg border bg-card px-3 py-2 text-sm text-muted-foreground">
+                      <div className="self-start rounded-sm border bg-card px-3 py-2 text-sm text-muted-foreground">
                         {t("assistant.thinking")}
                       </div>
                     )}
                     {turn.status === "error" && (
-                      <div className="self-start rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      <div className="self-start rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                         {t("assistant.error")}
                       </div>
                     )}
                     {turn.status === "done" && (
-                      <div className="self-start rounded-lg border bg-card px-3 py-2 text-sm text-foreground">
+                      <div className="self-start rounded-sm border bg-card px-3 py-2 text-sm text-foreground">
                         <p className="whitespace-pre-wrap">{turn.answer}</p>
                         {turn.citations.length > 0 && (
                           <div className="mt-2 flex flex-col gap-1 border-t pt-2">
@@ -93,7 +93,7 @@ export function AssistantPanel({ turns, onAsk, onClose }: AssistantPanelProps) {
               }}
               placeholder={t("assistant.placeholder")}
               rows={2}
-              className="h-16 flex-1 resize-none rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+              className="h-16 flex-1 resize-none rounded-sm border border-border bg-background px-2 py-1.5 text-sm"
             />
             <Button size="sm" disabled={draft.trim() === ""} onClick={submit}>
               {t("assistant.send")}

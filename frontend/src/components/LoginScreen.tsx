@@ -24,9 +24,11 @@ export function LoginScreen({ onLogin, onRegister, error, loading }: LoginScreen
   };
 
   return (
-    <div className="flex h-svh w-full items-center justify-center bg-background text-foreground">
-      <Card className="w-80">
+    <div className="relative flex h-svh w-full items-center justify-center overflow-hidden bg-background text-foreground">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,oklch(1_0_0/6%),transparent_60%)]" />
+      <Card className="glow-primary relative w-80">
         <CardHeader className="text-center">
+          <p className="text-xs text-muted-foreground">{t("auth.consoleLabel")}</p>
           <CardTitle className="font-heading text-2xl">{t("auth.title")}</CardTitle>
           <p className="text-sm text-muted-foreground">{t("auth.subtitle")}</p>
         </CardHeader>
@@ -38,7 +40,7 @@ export function LoginScreen({ onLogin, onRegister, error, loading }: LoginScreen
               onChange={(e) => setUsername(e.target.value)}
               placeholder={t("auth.username")}
               autoComplete="username"
-              className="h-9 rounded-lg border border-border bg-background px-3 text-sm"
+              className="h-9 rounded-sm border border-border bg-background px-3 font-mono text-sm outline-none focus:border-primary/60 focus:ring-3 focus:ring-primary/20"
             />
             <input
               type="password"
@@ -46,7 +48,7 @@ export function LoginScreen({ onLogin, onRegister, error, loading }: LoginScreen
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("auth.password")}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
-              className="h-9 rounded-lg border border-border bg-background px-3 text-sm"
+              className="h-9 rounded-sm border border-border bg-background px-3 font-mono text-sm outline-none focus:border-primary/60 focus:ring-3 focus:ring-primary/20"
             />
             {error && (
               <p className="text-sm text-destructive">
