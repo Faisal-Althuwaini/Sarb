@@ -28,60 +28,73 @@ and not started.
 ## Why Kafka?
 
 The simulator publishes each drone's telemetry to a single Kafka topic
-(`drone.telemetry`). Multiple independent consumers — the WebSocket push to
-the browser, the alert engine, the flight-log writer — each subscribe to that
-one stream and do their own job without knowing about each other. That
-fan-out (one producer, many decoupled consumers, each able to fail/retry/scale
-independently) is the core architectural story of this project. It arrives in
-Phase 3; Phase 1 talks to the browser directly to get the visible demo working
-fast.
+(`drone.telemetry`). Two independent consumer groups subscribe to that one
+stream and do their own job without knowing about each other:
+`telemetry-service` (pushes each frame to the browser over WebSocket *and*
+writes a flight-log row) and `alert-service` (runs geofence/battery/signal
+rules and produces `drone.alerts`, which `telemetry-service` also relays to
+the browser). That fan-out — one producer, multiple decoupled consumers,
+each able to fail/retry/scale independently — is the core architectural
+story of this project. It arrived in Phase 3; Phase 1 talked to the browser
+directly to get the visible demo working fast, before Kafka was introduced.
 
 ## Architecture at a glance
 
 ```
 Frontend (React, live map, Arabic RTL)
-  --STOMP/WebSocket (JWT on CONNECT)--> Telemetry Service      [Phase 1/3/6]
-  --REST (JWT: Bearer token)-------------------> Gateway       [Phase 6]
-                                                    |-- Auth Service (issues JWT)
-                                                    |-- Alert Service
-                                                    |-- Mission Service
-                                                    '-- RAG Service (Claude + pgvector)
+  --STOMP/WebSocket (JWT on CONNECT)--> Telemetry Service
+       (relays /topic/telemetry + /topic/alerts + /topic/missions)
+  --REST (JWT: Bearer token)-------------------> Gateway
+                                                    |-- Auth Service     /api/auth/**    (public)
+                                                    |-- Alert Service    /api/alerts/**
+                                                    |-- Mission Service  /api/missions/**
+                                                    '-- RAG Service      /api/assistant/**
 
-Simulator --> drone.telemetry (Kafka) --> Telemetry / Alert / Flight-log     [Phase 3]
-Mission Service --> mission.events (Kafka)                                   [Phase 4]
-RAG Service <--> Postgres/pgvector, Ollama (embeddings), Claude API          [Phase 5]
+Simulator --> drone.telemetry (Kafka) --+--> Telemetry Service (WS push + flight-log write)
+                                         '--> Alert Service (rules) --> drone.alerts (Kafka) --> Telemetry Service
+Mission Service <--> mission.events (Kafka) <--> Simulator (flies assigned routes)
+RAG Service <--> Postgres/pgvector, Ollama (embeddings), Claude API
 ```
-
-Full Mermaid diagrams: [`docs/architecture.md`](./docs/architecture.md).
 
 ## Repo layout
 
 ```
 Sarb/
 ├── docker-compose.yml       # Postgres+pgvector, Kafka (KRaft), kafka-ui, and all 7 services + frontend
+├── drone-fleet-platform-brief.md  # full design brief - goals, decisions, phase-by-phase build log
 ├── gateway/                 # Spring Cloud Gateway (MVC) - JWT-gated routing to every backend
-├── auth-service/            # Hand-rolled JWT auth (register/login, BCrypt, Postgres)
-├── simulator-service/       # N virtual drones, tick loop, flies assigned missions
-├── telemetry-service/       # Kafka consumer -> STOMP/WebSocket host, flight-log writer
-├── alert-service/           # geofence/battery/signal rule engine
-├── mission-service/         # mission CRUD + lifecycle events
+├── auth-service/            # Hand-rolled JWT auth (register/login, BCrypt, Postgres schema `auth`)
+├── simulator-service/       # N virtual drones, tick loop, flies assigned missions, produces drone.telemetry
+├── telemetry-service/       # Consumes drone.telemetry/drone.alerts/mission.events -> STOMP/WebSocket + flight-log writer
+├── alert-service/           # Consumes drone.telemetry, geofence/battery/signal rule engine, produces drone.alerts
+├── mission-service/         # Mission CRUD + lifecycle, produces/consumes mission.events
 ├── rag-service/             # Spring AI RAG assistant (Claude + Ollama + pgvector)
 ├── frontend/                # Vite + React + TS, shadcn/ui, Arabic RTL, Leaflet
+│   └── src/
+│       ├── components/      # DroneMap, AlertsPanel, MissionsPanel, AssistantPanel, LoginScreen, ui/ (shadcn)
+│       ├── hooks/           # useAuth, useFleetTelemetry, useAlerts, useMissions, useAssistant
+│       ├── types/, utils/   # per-domain DTOs and status/color-mapping helpers
+│       └── i18n/            # Arabic string bundle
 └── docs/
-    └── architecture.md
+    └── architecture.md      # full Mermaid diagrams + conventions
 ```
+
+Every backend service follows the same internal shape: an interface + `XxxImpl`
+for each service-layer component, Lombok (`@RequiredArgsConstructor`,
+`@Slf4j`, `@Getter`/`@Setter`) on mutable classes, immutable `record`
+`@ConfigurationProperties`, and constructor injection throughout.
 
 ## Stack
 
-- **Backend:** Java 21, Spring Boot 4.1 (Maven, `application.properties`)
-- **Gateway:** Spring Cloud Gateway Server MVC (servlet, non-reactive variant)
-- **Auth:** hand-rolled JWT (jjwt), BCrypt via Spring Security
-- **Real-time:** STOMP over SockJS (`/ws`, broker `/topic`, telemetry on `/topic/telemetry`) - the one thing that bypasses the gateway (see `docs/architecture.md`)
-- **Frontend:** Vite + React + TypeScript, Tailwind CSS + shadcn/ui, react-leaflet, react-i18next (`ar` bundle), `@fontsource/cairo`
-- **Messaging:** Apache Kafka (KRaft mode, no Zookeeper)
-- **Data:** PostgreSQL + pgvector
-- **AI:** Spring AI - Claude (Anthropic) chat + Ollama (`bge-m3`) embeddings, `PgVectorStore`
-- **Deployment:** one Dockerfile per service, `docker compose up` for the whole stack
+- **Backend:** Java 21 (virtual threads on), Spring Boot 4.1.0 (Maven, `application.properties`, Lombok, interface+Impl split)
+- **Gateway:** Spring Cloud Gateway Server MVC (servlet, non-reactive variant), Spring Cloud 2025.1.2
+- **Auth:** hand-rolled JWT (jjwt 0.12.6, HS512), BCrypt via Spring Security
+- **Real-time:** STOMP over SockJS (`/ws`, broker `/topic` - `/topic/telemetry`, `/topic/alerts`, `/topic/missions`) - the one thing that bypasses the gateway, since Gateway MVC can't proxy WebSocket upgrades (see `docs/architecture.md`)
+- **Frontend:** Vite + React 19 + TypeScript, Tailwind CSS 4 + shadcn/ui (Radix), react-leaflet, `@stomp/stompjs` + `sockjs-client`, react-i18next (`ar` bundle), `@fontsource/cairo`
+- **Messaging:** Apache Kafka (KRaft mode, no Zookeeper) - topics `drone.telemetry`, `drone.alerts`, `mission.events`
+- **Data:** PostgreSQL + pgvector (one schema per service: `auth`, `telemetry`, `alert`, `mission`, `rag`)
+- **AI:** Spring AI 2.0.0 - Claude (Anthropic) chat + Ollama (`bge-m3`) embeddings, `spring-ai-rag` (`RetrievalAugmentationAdvisor`), `PgVectorStore`
+- **Deployment:** one multi-stage Dockerfile per service (`eclipse-temurin:21` / `node:22-alpine`+`nginx`), `docker compose up` for the whole stack
 
 ## Running it
 
