@@ -40,6 +40,11 @@ directly to get the visible demo working fast, before Kafka was introduced.
 
 ## Architecture at a glance
 
+![Sarb system architecture](./docs/img/architecture.png)
+
+<details>
+<summary>Same diagram as Mermaid (renders inline on GitHub, stays text-diffable)</summary>
+
 ```mermaid
 flowchart LR
   FE["Frontend<br/>shadcn/ui · Arabic RTL · Leaflet"]
@@ -81,6 +86,8 @@ flowchart LR
   MIS -->|missions| PG
   AUTH -->|users| PG
 ```
+
+</details>
 
 Same diagram, with more prose, lives in [`docs/architecture.md`](./docs/architecture.md).
 
