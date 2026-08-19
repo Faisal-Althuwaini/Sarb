@@ -14,37 +14,41 @@ import org.springframework.context.annotation.Configuration;
 public class RagConfig {
 
     private static final String SYSTEM_PROMPT = """
-            أنت المساعد الذكي لمنصة "سرب" لعمليات أسطول الطائرات المسيّرة. مهمتك
-            الإجابة عن أسئلة المشغّلين حول لائحة الطيران المسيّر GACAR الجزء 107
-            الصادرة عن الهيئة العامة للطيران المدني، وإجراءات التشغيل الداخلية
-            الموحدة (SOP) لمنصة سرب.
+            You are the AI assistant for the "Sarb" drone fleet operations
+            platform. Your job is to answer operators' questions about the
+            GACAR Part 107 unmanned aircraft regulation issued by the General
+            Authority of Civil Aviation, and Sarb's internal Standard
+            Operating Procedures (SOPs).
 
-            التزم دائمًا بما يلي:
-            - أجب باللغة العربية الفصحى فقط، بصرف النظر عن لغة المصدر المسترجع.
-            - استند حصريًا إلى المقاطع المسترجعة ضمن السياق المرفق؛ لا تختلق أي
-              معلومة غير واردة فيه.
-            - اذكر في نهاية إجابتك مصدر كل معلومة (اسم الوثيقة، ورقم القسم أو
-              الصفحة إن توفر في بيانات المصدر).
-            - إذا تعارضت وثيقة SOP الداخلية مع لائحة GACAR الرسمية، نبّه المستخدم
-              إلى أن الأسبقية دائمًا للائحة الرسمية.
+            Always:
+            - Answer in English only, regardless of the retrieved source's language.
+            - Rely exclusively on the retrieved passages in the attached context;
+              never fabricate information that isn't present in it.
+            - Cite the source of each piece of information at the end of your
+              answer (document name, and section or page number if available
+              in the source metadata).
+            - If an internal SOP document conflicts with the official GACAR
+              regulation, alert the user that the official regulation always
+              takes precedence.
             """;
 
     private static final PromptTemplate CONTEXT_PROMPT_TEMPLATE = new PromptTemplate("""
-            معلومات السياق التالية مسترجعة من وثائق المصدر:
+            The following context information is retrieved from source documents:
             ---------------------
             {context}
             ---------------------
-            بالاعتماد على معلومات السياق أعلاه فقط، أجب عن السؤال التالي باللغة
-            العربية مع ذكر المصدر.
-            السؤال: {query}
-            الإجابة:
+            Based solely on the context information above, answer the following
+            question in English, citing the source.
+            Question: {query}
+            Answer:
             """);
 
     private static final PromptTemplate EMPTY_CONTEXT_PROMPT_TEMPLATE = new PromptTemplate("""
-            لم يتم العثور على معلومات ذات صلة بالسؤال التالي ضمن وثائق اللائحة أو
-            إجراءات التشغيل الموحدة. أخبر المستخدم بوضوح، باللغة العربية، أنه لا
-            تتوفر إجابة موثوقة في المصادر المتاحة، دون تخمين إجابة.
-            السؤال: {query}
+            No information relevant to the following question was found in the
+            regulation documents or standard operating procedures. Clearly tell
+            the user, in English, that no reliable answer is available in the
+            available sources, without guessing an answer.
+            Question: {query}
             """);
 
     @Bean

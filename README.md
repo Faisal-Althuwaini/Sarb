@@ -161,6 +161,10 @@ docker compose ps
 Open **http://localhost:5173**, register an account, and the whole system
 is live: drones moving on the map, alerts, missions, and the RAG assistant.
 
+Or skip manual registration — `./scripts/seed.sh` registers a demo login
+(`operator1` / `drone-pass-123`) and assigns one drone a patrol mission
+against the running stack.
+
 ### Option B — run services individually (development)
 
 Each service has its own Maven wrapper, a `.env.example` to copy from where
