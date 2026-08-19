@@ -11,9 +11,22 @@ The UI is **Arabic, RTL-first** (`dir="rtl" lang="ar"`); code, APIs, Kafka
 topics, JSON fields, and enum codes stay English, with the frontend mapping
 codes to Arabic labels.
 
-See [`drone-fleet-platform-brief.md`](./drone-fleet-platform-brief.md) for the
-full design brief (goals, architecture, settled decisions, build phases) and
-[`docs/architecture.md`](./docs/architecture.md) for diagrams and conventions.
+See [`docs/architecture.md`](./docs/architecture.md) for full diagrams and
+conventions.
+
+## Highlights
+
+- **Event-driven core:** one Kafka topic, two independent consumer groups
+  (WebSocket relay + rule engine) — decoupled, independently scalable
+  services, not a monolith with a message queue bolted on.
+- **RAG assistant:** Spring AI + Claude + Ollama embeddings + pgvector,
+  answering regulatory questions grounded in real documents.
+- **Real infrastructure, not a toy:** JWT auth, an API gateway in front of
+  7 services, Postgres per-service schemas, and a single
+  `docker compose up` that brings the whole stack live.
+- **Arabic-first UI:** genuine RTL layout (`dir="rtl" lang="ar"`), not a
+  translated afterthought — English stays in code/APIs/Kafka topics, mapped
+  to Arabic labels at the edge.
 
 ## Status
 
@@ -96,7 +109,6 @@ Same diagram, with more prose, lives in [`docs/architecture.md`](./docs/architec
 ```
 Sarb/
 ├── docker-compose.yml       # Postgres+pgvector, Kafka (KRaft), kafka-ui, and all 7 services + frontend
-├── drone-fleet-platform-brief.md  # full design brief - goals, decisions, phase-by-phase build log
 ├── gateway/                 # Spring Cloud Gateway (MVC) - JWT-gated routing to every backend
 ├── auth-service/            # Hand-rolled JWT auth (register/login, BCrypt, Postgres schema `auth`)
 ├── simulator-service/       # N virtual drones, tick loop, flies assigned missions, produces drone.telemetry
